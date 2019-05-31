@@ -623,6 +623,18 @@ class C_Exif_Writer_Wrapper
         return @C_Exif_Writer::read_metadata($filename);
     }
     /**
+     * @param array $exif
+     * @return array
+     */
+    public static function reset_orientation($exif = array())
+    {
+        if (!M_NextGen_Data::check_pel_min_php_requirement()) {
+            return array();
+        }
+        self::load_pel();
+        return @C_Exif_Writer::reset_orientation($exif);
+    }
+    /**
      * @param $filename
      * @param $metadata
      * @return bool|int
@@ -827,10 +839,10 @@ class Mixin_Gallery_Mapper extends Mixin
     }
     function _save_entity($entity)
     {
+        $storage = C_Gallery_Storage::get_instance();
         // A bug in NGG 2.1.24 allowed galleries to be created with spaces in the directory name, unreplaced by dashes
         // This causes a few problems everywhere, so we here allow users a way to fix those galleries by just re-saving
         if (FALSE !== strpos($entity->path, ' ')) {
-            $storage = C_Gallery_Storage::get_instance();
             $abspath = $storage->get_gallery_abspath($entity->{$entity->id_field});
             $pre_path = $entity->path;
             $entity->path = str_replace(' ', '-', $entity->path);
@@ -859,6 +871,7 @@ class Mixin_Gallery_Mapper extends Mixin
         }
         $retval = $this->call_parent('_save_entity', $entity);
         if ($retval) {
+            wp_mkdir_p($storage->get_gallery_abspath($entity));
             do_action('ngg_created_new_gallery', $entity->{$entity->id_field});
             C_Photocrati_Transient_Manager::flush('displayed_gallery_rendering');
         }
@@ -3662,6 +3675,9 @@ class Mixin_GalleryStorage_Base_Dynamic extends Mixin
                 }
                 if ($rotation && in_array(abs($rotation), array(90, 180, 270))) {
                     $thumbnail->rotateImageAngle($rotation);
+                    $remove_orientation_exif = TRUE;
+                } else {
+                    $remove_orientation_exif = FALSE;
                 }
                 $flip = strtolower($flip);
                 if ($flip && in_array($flip, array('h', 'v', 'hv'))) {
@@ -3679,6 +3695,11 @@ class Mixin_GalleryStorage_Base_Dynamic extends Mixin
                 $thumbnail = apply_filters('ngg_before_save_thumbnail', $thumbnail);
                 $exif_iptc = @C_Exif_Writer_Wrapper::read_metadata($image_path);
                 $thumbnail->save($destpath, $quality);
+                // We've just rotated the image however the EXIF metadata contains an Orientation tag. To prevent
+                // certain browsers from rotating our already-rotated image we reset the Orientation tag to the default.
+                if ($remove_orientation_exif && !empty($exif_iptc['exif'])) {
+                    $exif_iptc['exif'] = @C_Exif_Writer_Wrapper::reset_orientation($exif_iptc['exif']);
+                }
                 @C_Exif_Writer_Wrapper::write_metadata($destpath, $exif_iptc);
             }
         }
@@ -4011,16 +4032,57 @@ class Mixin_GalleryStorage_Base_Dynamic extends Mixin
         $image_abspath = $this->object->get_image_abspath($image, 'full');
         $generated = $this->object->generate_image_clone($image_abspath, $image_abspath, $this->object->get_image_size_params($image, 'full'));
         if ($generated && $save) {
-            // Ensure that fullsize dimensions are added to metadata array
-            $dimensions = getimagesize($image_abspath);
-            $full_meta = array('width' => $dimensions[0], 'height' => $dimensions[1], 'md5' => $this->object->get_image_checksum($image, 'full'));
-            if (!isset($image->meta_data) or is_string($image->meta_data) && strlen($image->meta_data) == 0 or is_bool($image->meta_data)) {
-                $image->meta_data = array();
-            }
-            $image->meta_data = array_merge($image->meta_data, $full_meta);
-            $image->meta_data['full'] = $full_meta;
-            // Don't forget to append the 'full' entry in meta_data in the db
-            $this->object->_image_mapper->save($image);
+            $this->object->update_image_dimension_metadata($image, $image_abspath);
+        }
+    }
+    public function update_image_dimension_metadata($image, $image_abspath)
+    {
+        // Ensure that fullsize dimensions are added to metadata array
+        $dimensions = getimagesize($image_abspath);
+        $full_meta = array('width' => $dimensions[0], 'height' => $dimensions[1], 'md5' => $this->object->get_image_checksum($image, 'full'));
+        if (!isset($image->meta_data) or is_string($image->meta_data) && strlen($image->meta_data) == 0 or is_bool($image->meta_data)) {
+            $image->meta_data = array();
+        }
+        $image->meta_data = array_merge($image->meta_data, $full_meta);
+        $image->meta_data['full'] = $full_meta;
+        // Don't forget to append the 'full' entry in meta_data in the db
+        $this->object->_image_mapper->save($image);
+    }
+    /**
+     * Most major browsers do not honor the Orientation meta found in EXIF. To prevent display issues we inspect
+     * the EXIF data and rotate the image so that the EXIF field is not necessary to display the image correctly.
+     * Note: generate_image_clone() will handle the removal of the Orientation tag inside the image EXIF.
+     * Note: This only handles single-dimension rotation; at the time this method was written there are no known
+     * camera manufacturers that both rotate and flip images.
+     * @param $image
+     * @param bool $save
+     */
+    public function correct_exif_rotation($image, $save = TRUE)
+    {
+        $image_abspath = $this->object->get_image_abspath($image, 'full');
+        // This method is necessary
+        if (!function_exists('exif_read_data')) {
+            return;
+        }
+        // We only need to continue if the Orientation tag is set
+        $exif = @exif_read_data($image_abspath, 'exif');
+        if (empty($exif['Orientation']) || $exif['Orientation'] == 1) {
+            return;
+        }
+        $degree = 0;
+        if ($exif['Orientation'] == 3) {
+            $degree = 180;
+        }
+        if ($exif['Orientation'] == 6) {
+            $degree = 90;
+        }
+        if ($exif['Orientation'] == 8) {
+            $degree = 270;
+        }
+        $parameters = array('rotation' => $degree);
+        $generated = $this->object->generate_image_clone($image_abspath, $image_abspath, $this->object->get_image_size_params($image, 'full', $parameters), $parameters);
+        if ($generated && $save) {
+            $this->object->update_image_dimension_metadata($image, $image_abspath);
         }
     }
     /**
@@ -4477,7 +4539,7 @@ class Mixin_GalleryStorage_Base_Getters extends Mixin
      * Returns the named sizes available for images
      * @return array
      */
-    function get_image_sizes($image)
+    function get_image_sizes($image = FALSE)
     {
         $retval = array('full', 'thumbnail');
         if (is_numeric($image)) {
@@ -4878,12 +4940,14 @@ class Mixin_GalleryStorage_Base_Management extends Mixin
                 if (is_writable($full_abspath) && is_writable(dirname($full_abspath))) {
                     // Copy the backup
                     if (@copy($backup_abspath, $full_abspath)) {
+                        // Backup images are not altered at all; we must re-correct the EXIF/Orientation tag
+                        $this->object->correct_exif_rotation($image, TRUE);
                         // Re-create non-fullsize image sizes
                         foreach ($this->object->get_image_sizes($image) as $named_size) {
                             if ($named_size == 'full') {
                                 continue;
                             }
-                            $this->object->generate_image_clone($backup_abspath, $this->object->get_image_abspath($image, $named_size), $this->object->get_image_size_params($image, $named_size));
+                            $this->object->generate_image_clone($full_abspath, $this->object->get_image_abspath($image, $named_size), $this->object->get_image_size_params($image, $named_size));
                         }
                         do_action('ngg_recovered_image', $image);
                         // Reimport all metadata
@@ -4983,73 +5047,80 @@ class Mixin_GalleryStorage_Base_MediaLibrary extends Mixin
  */
 class Mixin_GalleryStorage_Base_Upload extends Mixin
 {
-    function import_gallery_from_fs($abspath, $gallery = FALSE, $create_new_gallerypath = TRUE, $gallery_title = NULL, $filenames = array())
+    /**
+     * @param string $abspath
+     * @param int $gallery_id
+     * @param bool $create_new_gallerypath
+     * @param null|string $gallery_title
+     * @param array[string] $filenames
+     * @return array|bool FALSE on failure
+     */
+    function import_gallery_from_fs($abspath, $gallery_id = NULL, $create_new_gallerypath = TRUE, $gallery_title = NULL, $filenames = array())
     {
-        $retval = FALSE;
-        if (@file_exists($abspath)) {
-            $fs = C_Fs::get_instance();
-            // Ensure that this folder has images
-            // Ensure that this folder has images
-            $i = 0;
-            $files = array();
-            foreach (scandir($abspath) as $file) {
-                if ($file == '.' || $file == '..') {
-                    continue;
-                }
-                $file_abspath = $fs->join_paths($abspath, $file);
-                // The first directory is considered valid
-                if (is_dir($file_abspath) && $i === 0) {
-                    $files[] = $file_abspath;
-                } elseif ($this->is_image_file($file_abspath)) {
-                    if ($filenames && array_search($file_abspath, $filenames) !== FALSE) {
-                        $files[] = $file_abspath;
-                    } else {
-                        if (!$filenames) {
-                            $files[] = $file_abspath;
-                        }
-                    }
-                }
+        if (@(!file_exists($abspath))) {
+            return FALSE;
+        }
+        $fs = C_Fs::get_instance();
+        // Ensure that this folder has images
+        $i = 0;
+        $files = array();
+        foreach (scandir($abspath) as $file) {
+            if ($file == '.' || $file == '..') {
+                continue;
             }
-            if (!empty($files)) {
-                // Get needed utilities
-                $gallery_mapper = C_Gallery_Mapper::get_instance();
-                // Sometimes users try importing a directory, which actually has all images under another directory
-                if (is_dir($files[0])) {
-                    return $this->object->import_gallery_from_fs($files[0], $gallery_id, $create_new_gallerypath, $gallery_title, $filenames);
-                }
-                // If no gallery has been specified, then use the directory name as the gallery name
-                if (!$gallery) {
-                    // Create the gallery
-                    $gallery = $gallery_mapper->create(array('title' => $gallery_title ? $gallery_title : M_I18n::mb_basename($abspath)));
-                    if (!$create_new_gallerypath) {
-                        $gallery_root = $fs->get_document_root('gallery');
-                        $gallery->path = str_ireplace($gallery_root, '', $abspath);
+            $file_abspath = $fs->join_paths($abspath, $file);
+            // The first directory is considered valid
+            if (is_dir($file_abspath) && $i === 0) {
+                $files[] = $file_abspath;
+            } elseif ($this->is_image_file($file_abspath)) {
+                if ($filenames && array_search($file_abspath, $filenames) !== FALSE) {
+                    $files[] = $file_abspath;
+                } else {
+                    if (!$filenames) {
+                        $files[] = $file_abspath;
                     }
-                    // Save the gallery
-                    if ($gallery->save()) {
-                        $gallery_id = $gallery->id();
-                    }
-                }
-                // Ensure that we have a gallery id
-                if ($gallery_id) {
-                    $retval = array('gallery_id' => $gallery_id, 'image_ids' => array());
-                    foreach ($files as $file_abspath) {
-                        if (!preg_match("/\\.(jpg|jpeg|gif|png)\$/i", $file_abspath)) {
-                            continue;
-                        }
-                        $image = null;
-                        if ($image_id = $this->import_image_file($gallery_id, $file_abspath, FALSE, FALSE, FALSE, FALSE)) {
-                            $retval['image_ids'][] = $image;
-                        }
-                    }
-                    // Add the gallery name to the result
-                    $gallery = $gallery_mapper->find($gallery_id);
-                    $retval['gallery_name'] = $gallery->title;
-                    unset($gallery);
                 }
             }
         }
-        return $retval;
+        if (empty($files)) {
+            return FALSE;
+        }
+        // Get needed utilities
+        $gallery_mapper = C_Gallery_Mapper::get_instance();
+        // Sometimes users try importing a directory, which actually has all images under another directory
+        if (is_dir($files[0])) {
+            return $this->object->import_gallery_from_fs($files[0], $gallery_id, $create_new_gallerypath, $gallery_title, $filenames);
+        }
+        // If no gallery has been specified, then use the directory name as the gallery name
+        if (!$gallery_id) {
+            // Create the gallery
+            $gallery = $gallery_mapper->create(array('title' => $gallery_title ? $gallery_title : M_I18n::mb_basename($abspath)));
+            if (!$create_new_gallerypath) {
+                $gallery_root = $fs->get_document_root('gallery');
+                $gallery->path = str_ireplace($gallery_root, '', $abspath);
+            }
+            // Save the gallery
+            if ($gallery->save()) {
+                $gallery_id = $gallery->id();
+            }
+        }
+        // Ensure that we have a gallery id
+        if ($gallery_id) {
+            $retval = array('gallery_id' => $gallery_id, 'image_ids' => array());
+            foreach ($files as $file_abspath) {
+                $basename = pathinfo($file_abspath, PATHINFO_BASENAME);
+                if ($image_id = $this->import_image_file($gallery_id, $file_abspath, $basename, FALSE, FALSE, FALSE)) {
+                    $retval['image_ids'][] = $image_id;
+                }
+            }
+            // Add the gallery name to the result
+            if (!isset($gallery)) {
+                $gallery = $gallery_mapper->find($gallery_id);
+            }
+            $retval['gallery_name'] = $gallery->title;
+            return $retval;
+        }
+        return FALSE;
     }
     function is_current_user_over_quota()
     {
@@ -5061,6 +5132,10 @@ class Mixin_GalleryStorage_Base_Upload extends Mixin
         }
         return $retval;
     }
+    /**
+     * @param string? $filename
+     * @return bool
+     */
     function is_image_file($filename = NULL)
     {
         $retval = FALSE;
@@ -5158,7 +5233,6 @@ class Mixin_GalleryStorage_Base_Upload extends Mixin
                 throw new E_InsufficientWriteAccessException(FALSE, $gallery_abspath, FALSE);
             }
             // Sanitize the filename for storing in the DB
-            $original_filename = $filename = preg_replace("#^/#", "", $filename ? $filename : basename($image_abspath));
             $filename = $this->sanitize_filename_for_db($filename);
             // Ensure that the filename is valid
             if (!preg_match("/(png|jpeg|jpg|gif)\$/i", $filename)) {
@@ -5224,6 +5298,8 @@ class Mixin_GalleryStorage_Base_Upload extends Mixin
             if ($settings->get('imgBackup', FALSE)) {
                 $this->object->backup_image($image, TRUE);
             }
+            // Most browsers do not honor EXIF's Orientation header: rotate the image to prevent display issues
+            $this->object->correct_exif_rotation($image, TRUE);
             // Create resized version of image
             if ($settings->get('imgAutoResize', FALSE)) {
                 $this->object->generate_resized_image($image, TRUE);
@@ -5237,7 +5313,7 @@ class Mixin_GalleryStorage_Base_Upload extends Mixin
             // delete dirsize after adding new images
             delete_transient('dirsize_cache');
             // Seems redundant to above hook. Maintaining for legacy purposes
-            do_action('ngg_after_new_images_added', is_numeric($dst_gallery) ? $dst_gallery : $dst_gallery->gid, array($image));
+            do_action('ngg_after_new_images_added', is_numeric($dst_gallery) ? $dst_gallery : $dst_gallery->gid, array($image_id));
             return $image_id;
         } else {
             throw new E_EntityNotFoundException();
@@ -5320,7 +5396,7 @@ class Mixin_GalleryStorage_Base_Upload extends Mixin
             $fs = C_Fs::get_instance();
             // Uses the WordPress ZIP abstraction API
             include_once $fs->join_paths(ABSPATH, 'wp-admin', 'includes', 'file.php');
-            WP_Filesystem();
+            WP_Filesystem(FALSE, get_temp_dir(), TRUE);
             // Ensure that we truly have the gallery id
             $gallery_id = $this->_get_gallery_id($gallery_id);
             $zipfile = $_FILES['file']['tmp_name'];

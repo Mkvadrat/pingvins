@@ -455,6 +455,7 @@ class Mixin_Attach_To_Post extends Mixin
         array_unshift($tags, $all_tags);
         $display_types = array();
         $registry = C_Component_Registry::get_instance();
+        $display_type_mapper->flush_query_cache();
         foreach ($display_type_mapper->find_all() as $display_type) {
             if (isset($display_type->hidden_from_igw) && $display_type->hidden_from_igw || isset($display_type->hidden_from_ui) && $display_type->hidden_from_ui) {
                 continue;
@@ -462,6 +463,18 @@ class Mixin_Attach_To_Post extends Mixin
             $available = $registry->is_module_loaded($display_type->name);
             if (!apply_filters('ngg_atp_show_display_type', $available, $display_type)) {
                 continue;
+            }
+            // Some display types were saved with values like "nextgen-gallery-pro/modules/nextgen_pro_imagebrowser/static/preview.jpg"
+            // as the preview_image_relpath property
+            if (strpos($display_type->preview_image_relpath, '#') === FALSE) {
+                $static_path = preg_replace("#^.*static/#", "", $display_type->preview_image_relpath);
+                $module_id = isset($display_type->module_id) ? $display_type->module_id : $display_type->name;
+                if ($module_id == 'photocrati-nextgen_basic_slideshow') {
+                    $display_type->module_id = $module_id = 'photocrati-nextgen_basic_gallery';
+                }
+                $display_type->preview_image_relpath = "{$module_id}#{$static_path}";
+                $display_type_mapper->save($display_type);
+                $display_type_mapper->flush_query_cache();
             }
             $display_type->preview_image_url = M_Static_Assets::get_static_url($display_type->preview_image_relpath);
             $display_types[] = $display_type;

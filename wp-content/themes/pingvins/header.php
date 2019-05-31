@@ -10,14 +10,6 @@ Version: 1.0
 ?>
 
 <!DOCTYPE html>
-<!--[if IE 7]>
-<html class="ie ie7" <?php language_attributes(); ?>>
-<![endif]-->
-<!--[if IE 8]>
-<html class="ie ie8" <?php language_attributes(); ?>>
-<![endif]-->
-<!--[if !(IE 7) & !(IE 8)]><!-->
-
 <html <?php language_attributes(); ?>>
   <head>
     <meta charset="UTF-8">
@@ -26,6 +18,7 @@ Version: 1.0
     
     <?php wp_head(); ?>
   </head>
+  <?php if( is_front_page() ) {?>
   <body>
     <header>
         <div class="container">
@@ -48,30 +41,91 @@ Version: 1.0
             <span class="icon-bar"></span>
             </button>
             <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
-                <nav class="nav navbar-nav">
-					<?php
-						if (has_nav_menu('header_menu')){
-							wp_nav_menu( array(
-								'theme_location'  => 'header_menu',
-								'menu'            => '',
-								'container'       => false,
-								'container_class' => '',
-								'container_id'    => '',
-								'menu_class'      => '',
-								'menu_id'         => '',
-								'echo'            => true,
-								'fallback_cb'     => 'wp_page_menu',
-								'before'          => '',
-								'after'           => '',
-								'link_before'     => '',
-								'link_after'      => '',
-								'items_wrap'      => '%3$s',
-								'walker'          => new header_menu(),
-							) );
-						}
-					?>
-                </nav>
+              <nav class="nav navbar-nav">
+                <?php
+                  if (has_nav_menu('header_menu')){
+                    wp_nav_menu( array(
+                      'theme_location'  => 'header_menu',
+                      'menu'            => '',
+                      'container'       => false,
+                      'container_class' => '',
+                      'container_id'    => '',
+                      'menu_class'      => '',
+                      'menu_id'         => '',
+                      'echo'            => true,
+                      'fallback_cb'     => 'wp_page_menu',
+                      'before'          => '',
+                      'after'           => '',
+                      'link_before'     => '',
+                      'link_after'      => '',
+                      'items_wrap'      => '%3$s',
+                      'walker'          => new header_menu(),
+                    ) );
+                  }
+                ?>
+              </nav>
             </div>
             </div>
         </div>
     </header>
+  <?php }else{ ?>
+  <body class="page">
+    <header>
+      <div class="container">
+        <div class="row">
+          <div class="col-12">
+            <div class="top__grid">
+              <div class="social-vk">
+                <?php echo get_option('pn_social_links'); ?>
+              </div>
+              <div class="logo">
+                <a href="<?php echo esc_url( home_url( '/' ) ); ?>">
+                    <img
+                      src="<?php header_image(); ?>"
+                      alt="logotype"
+                    />
+                    <?php echo get_option('pn_city_pages'); ?>
+                </a>
+              </div>
+              <div class="social-phone">
+                <?php echo get_option('pn_messenger'); ?>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+        <div class="navigation-top">
+            <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#bs-example-navbar-collapse-1" aria-expanded="false">
+                <span class="sr-only">Toggle navigation</span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+                <span class="icon-bar"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
+                <nav class="nav navbar-nav">
+                  <?php
+                    if (has_nav_menu('other_menu')){
+                      wp_nav_menu( array(
+                        'theme_location'  => 'other_menu',
+                        'menu'            => '',
+                        'container'       => false,
+                        'container_class' => '',
+                        'container_id'    => '',
+                        'menu_class'      => '',
+                        'menu_id'         => '',
+                        'echo'            => true,
+                        'fallback_cb'     => 'wp_page_menu',
+                        'before'          => '',
+                        'after'           => '',
+                        'link_before'     => '',
+                        'link_after'      => '',
+                        'items_wrap'      => '%3$s',
+                        'walker'          => new other_menu(),
+                      ) );
+                    }
+                  ?>
+                </nav>
+            </div>
+        </div>
+    </header>
+  <?php } ?>

@@ -161,6 +161,11 @@ jQuery(function (){
 	    var height = ( results ) ? results[1] : 500;
 		var container = window;
 
+		var screen_width = window.innerWidth - 120;
+		var screen_height = window.innerHeight - 200;
+		width = (width > screen_width) ? screen_width : width;
+		height = (height > screen_height) ? screen_height : height;
+
       if (window.parent) {
       	container = window.parent;
       }
@@ -634,7 +639,21 @@ jQuery(document).ready( function($) {
 
 	<script type="text/javascript">
 	/* <![CDATA[ */
-	jQuery(document).ready(function(){columns.init('nggallery-manage-images');});
+	jQuery(document).ready(function($){
+		columns.init('nggallery-manage-images');
+
+		// Ensure that thumb preview images are always up-to-date
+		$('#ngg-listimages img.thumb').each(function(){
+			var $this 		= $(this);
+			var src 		= $this.attr('src');
+			var matchData 	= src.match(/\?i=(\d+)$/)
+			if (matchData) {
+				var i 	= parseInt(matchData[1])+1
+				src		= src.replace(matchData[0], "?i="+i.toString())
+				$this.attr('src', src);
+			}
+		})
+	});
 	/* ]]> */
 	</script>
 	<?php

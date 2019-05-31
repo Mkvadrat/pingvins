@@ -4,7 +4,7 @@ if(preg_match('#' . basename(__FILE__) . '#', $_SERVER['PHP_SELF'])) { die('You 
 /**
  * Plugin Name: NextGEN Gallery
  * Description: The most popular gallery plugin for WordPress and one of the most popular plugins of all time with over 25 million downloads.
- * Version: 3.1.11
+ * Version: 3.2.2
  * Author: Imagely
  * Plugin URI: https://www.imagely.com/wordpress-gallery-plugin/nextgen-gallery/
  * Author URI: https://www.imagely.com
@@ -393,7 +393,10 @@ class C_NextGEN_Bootstrap
 	{
 		// Register the (de)activation routines
 		add_action('deactivate_' . NGG_PLUGIN_BASENAME, array(get_class(), 'deactivate'));
-        add_action('activate_'   . NGG_PLUGIN_BASENAME, array(get_class(), 'activate'), -10);
+		add_action('activate_'   . NGG_PLUGIN_BASENAME, array(get_class(), 'activate'), -10);
+		
+		// Handle activation redirect to overview page
+		add_action('init', array($this, 'handle_activation_redirect'));
 
 		// Register our test suite
 		add_filter('simpletest_suites', array(&$this, 'add_testsuite'));
@@ -449,6 +452,14 @@ class C_NextGEN_Bootstrap
 				$enabled = FALSE;
 		}
 		return $enabled;
+	}
+
+	function handle_activation_redirect()
+	{
+		if (get_transient('ngg-activated')) {
+			delete_transient('ngg-activated');
+			wp_redirect(admin_url("?page=nextgen-gallery"));
+		}
 	}
 
 	function fix_autoupdate_api_requests($args, $url)
@@ -662,9 +673,9 @@ class C_NextGEN_Bootstrap
 		C_Photocrati_Installer::uninstall(NGG_PLUGIN_BASENAME);
 	}
 
-	public static function activate()
-    {
-        // Set the capabilities for the administrator
+	public static function set_role_caps()
+	{
+		// Set the capabilities for the administrator
         $role = get_role('administrator');
 
         // We need this role, no other chance
@@ -689,7 +700,14 @@ class C_NextGEN_Bootstrap
 
         foreach ($capabilities as $capability) {
             $role->add_cap($capability);
-        }
+		}
+	}
+
+	public static function activate()
+    {
+        self::set_role_caps();
+		
+		set_transient('ngg-activated', time(), 30);
     }
 
 	/**
@@ -707,7 +725,7 @@ class C_NextGEN_Bootstrap
 		define('NGG_PRODUCT_URL', path_join(str_replace("\\" , '/', NGG_PLUGIN_URL), 'products'));
 		define('NGG_MODULE_URL', path_join(str_replace("\\", '/', NGG_PRODUCT_URL), 'photocrati_nextgen/modules'));
 		define('NGG_PLUGIN_STARTED_AT', microtime());
-		define('NGG_PLUGIN_VERSION', '3.1.11');
+		define('NGG_PLUGIN_VERSION', '3.2.2');
 
 		define(
 			'NGG_SCRIPT_VERSION',
@@ -1012,13 +1030,13 @@ function ngg_fs( $activate_for_all = false ) {
 		} else {
 			// Don't run Freemius for plugin updates.
 			$run_freemius = false;
-		if (is_null($ngg_run_freemius))
-			update_option('ngg_run_freemius', FALSE);
-		}
+			if (is_null($ngg_run_freemius))
+				update_option('ngg_run_freemius', FALSE);
+			}
 
-		if ( ! $run_freemius ) {
-			return false;
-		}
+			if ( ! $run_freemius ) {
+				return false;
+			}
 	}
 
 	if ( ! isset( $ngg_fs ) ) {
@@ -1062,9 +1080,10 @@ function ngg_fs( $activate_for_all = false ) {
 	return $ngg_fs;
 }
 
-// Init Freemius.
-ngg_fs();
+// // Init Freemius.
+// Update 2019-03-19: don't run on any instances
+// ngg_fs();
 
-#endregion Freemius
+// #endregion Freemius
 
 new C_NextGEN_Bootstrap();

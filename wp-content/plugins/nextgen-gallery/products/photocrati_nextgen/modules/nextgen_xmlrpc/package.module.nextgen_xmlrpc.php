@@ -863,7 +863,7 @@ class C_NextGen_API extends C_Component
                                                         $ngg_image = $storage->upload_base64_image($gallery, $image_data, $image_filename, $image_id, true);
                                                         if ($ngg_image != null) {
                                                             $image_status = 'done';
-                                                            $image_id = $ngg_image->{$ngg_image->id_field};
+                                                            $image_id = is_int($ngg_image) ? $ngg_image : $ngg_image->{$ngg_image->id_field};
                                                         }
                                                     } catch (E_NoSpaceAvailableException $e) {
                                                         $image_error = __('No space available for image (%1$s).', 'nggallery');
@@ -1301,6 +1301,7 @@ class C_NextGen_API_XMLRPC extends C_Component
                     try {
                         $image = $storage->upload_base64_image($gallery, $data['bits'], $data['name'], $data['image_id'], $data['override']);
                         if ($image) {
+                            $image = is_int($image) ? C_Image_Mapper::get_instance()->find($image, TRUE) : $image;
                             $storage = C_Gallery_Storage::get_instance();
                             $image->imageURL = $storage->get_image_url($image);
                             $image->thumbURL = $storage->get_thumb_url($image);
