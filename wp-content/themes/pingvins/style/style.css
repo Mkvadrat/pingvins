@@ -101,7 +101,7 @@ header {
 .navigation-top {
     position: absolute;
     bottom: 0px;
-    width: 85%;
+    width: 100%;
     background: #53b0de;
     border-radius: 10px;
 }
@@ -973,7 +973,10 @@ footer {
 .page header .container {
     width: calc(100% - 60px);
 }
-
+.navbar-nav{
+	    float: none;
+    text-align: center;
+}
 .page .navbar-nav {
     float: none;
     display: flex;
@@ -1549,6 +1552,11 @@ footer h2 {
     }
 }
 
+@media (min-width: 1200px) {
+	.col-md-6.show-info{
+		width: 57.33%;
+	}
+}
 @media (max-width: 1200px) {
     .navigation-top, .city {
         width: 100%;
